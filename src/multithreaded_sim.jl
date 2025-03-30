@@ -2,7 +2,7 @@ module QSim_MT
 
 using LinearAlgebra, SparseArrays, Base.Threads, Polyester
 
-export sv, u!, h!, x!, y!, z!, rx!, ry!, rz!, 
+export statevector, u!, h!, x!, y!, z!, rx!, ry!, rz!, 
        cnot!, crx!, cry!, crz!, swap!, mp, prstate,measure
 
 # Core Constants and Operators
@@ -59,13 +59,16 @@ function id(n::Int)
     n == 0 ? sparse([c1]) : spdiagm(0 => ones(ComplexF16, 1 << n))
 end
 
-function sv(n::Int, m::Int)
+function statevector(n::Int, m::Int)
     s = spzeros(ComplexF16, 1 << n)
     s[m+1] = c1
     s
 end
 
 nb(s::SparseVector{ComplexF16,Int}) = round(Int, log2(length(s)))
+
+
+#single qubit gates
 
 function u!(s::SparseVector{ComplexF16,Int}, U::SparseMatrixCSC{ComplexF16,Int})
     size(U, 2) == length(s) || error("Dimension mismatch")
@@ -85,7 +88,7 @@ function u!(s::SparseVector{ComplexF16,Int}, U::SparseMatrixCSC{ComplexF16,Int})
     dropzeros!(s) #experimental may remove later
 end
 
-function u!(s::SparseVector{ComplexF16,Int}, t::Int, U::SparseMatrixCSC{ComplexF16,Int})
+function u2!(s::SparseVector{ComplexF16,Int}, t::Int, U::SparseMatrixCSC{ComplexF16,Int})
     q = nb(s)
     l = t - 1
     r = q - t
@@ -93,11 +96,22 @@ function u!(s::SparseVector{ComplexF16,Int}, t::Int, U::SparseMatrixCSC{ComplexF
     dropzeros!(s) #experimental may remove later
 end
 
-# Gate definitions
-h!(s::SparseVector{ComplexF16,Int}, t::Int) = u!(s, t, H)
-x!(s::SparseVector{ComplexF16,Int}, t::Int) = u!(s, t, X)
-y!(s::SparseVector{ComplexF16,Int}, t::Int) = u!(s, t, Y)
-z!(s::SparseVector{ComplexF16,Int}, t::Int) = u!(s, t, Z)
+
+function h!(s::SparseVector{ComplexF16,Int}, t::Int)
+    u2!(s, t, H)
+end
+
+function x!(s::SparseVector{ComplexF16,Int}, t::Int)
+    u2!(s, t, X)
+end
+
+function y!(s::SparseVector{ComplexF16,Int}, t::Int)
+    u2!(s, t, Y)
+end
+
+function z!(s::SparseVector{ComplexF16,Int}, t::Int)
+    u2!(s, t, Z)
+end
 
 # Rotation gates
 function rx_gate(theta::Real)
@@ -118,10 +132,19 @@ function rz_gate(theta::Real)
     c*I2 - im_F16*s*Z
 end
 
-rx!(s::SparseVector{ComplexF16,Int}, t::Int, theta::Real) = u!(s, t, rx_gate(theta))
-ry!(s::SparseVector{ComplexF16,Int}, t::Int, theta::Real) = u!(s, t, ry_gate(theta))
-rz!(s::SparseVector{ComplexF16,Int}, t::Int, theta::Real) = u!(s, t, rz_gate(theta))
+function rx!(s::SparseVector{ComplexF16,Int}, t::Int, theta::Real)
+    u2!(s, t, rx_gate(theta))
+end
 
+function ry!(s::SparseVector{ComplexF16,Int}, t::Int, theta::Real)
+    u2!(s, t, ry_gate(theta))
+end
+
+function rz!(s::SparseVector{ComplexF16,Int}, t::Int, theta::Real)
+    u2!(s, t, rz_gate(theta))
+end
+
+#controlled gates
 
 function controlled!(s::SparseVector{ComplexF16,Int}, c::Int, t::Int, V::SparseMatrixCSC{ComplexF16,Int})
     # Total number of qubits in state vector
@@ -156,11 +179,21 @@ function controlled!(s::SparseVector{ComplexF16,Int}, c::Int, t::Int, V::SparseM
 end
 
 
+function cnot!(s::SparseVector{ComplexF16,Int}, c::Int, t::Int)
+    controlled!(s, c, t, X)
+end
 
-cnot!(s::SparseVector{ComplexF16,Int}, c::Int, t::Int) = controlled!(s, c, t, X)
-crx!(s::SparseVector{ComplexF16,Int}, c::Int, t::Int, theta::Real) = controlled!(s, c, t, rx_gate(theta))
-cry!(s::SparseVector{ComplexF16,Int}, c::Int, t::Int, theta::Real) = controlled!(s, c, t, ry_gate(theta))
-crz!(s::SparseVector{ComplexF16,Int}, c::Int, t::Int, theta::Real) = controlled!(s, c, t, rz_gate(theta))
+function crx!(s::SparseVector{ComplexF16,Int}, c::Int, t::Int, theta::Real)
+    controlled!(s, c, t, rx_gate(theta))
+end
+
+function cry!(s::SparseVector{ComplexF16,Int}, c::Int, t::Int, theta::Real)
+    controlled!(s, c, t, ry_gate(theta))
+end
+
+function crz!(s::SparseVector{ComplexF16,Int}, c::Int, t::Int, theta::Real)
+    controlled!(s, c, t, rz_gate(theta))
+end
 
 
 function swap!(s::SparseVector{ComplexF16,Int}, q1::Int, q2::Int)
@@ -179,6 +212,19 @@ end
 mp(s::SparseVector{ComplexF16,Int}) = abs2.(s)
 
 function measure_z(s::SparseVector{ComplexF16,Int}, t::Int)
+    r"""
+    measure_y(s::SparseVector{ComplexF16,Int}, t::Int)
+
+Measure the quantum state `s` in the Z basis.
+
+
+# Arguments
+- `s`: A `SparseVector{ComplexF16,Int}` representing the quantum state.
+- `t`: An `Int` specifying the qubit index to be measured.
+
+# Returns
+- The measurement result in the Z basis as returned by `measure_z`.
+"""
     n = nb(s)
     probs = mp(s)
     p0 = 0.0
@@ -198,6 +244,19 @@ end
 
 # To measure in the X basis, first apply a Hadamard gate (rotates X⇔Z)
 function measure_x(s::SparseVector{ComplexF16,Int}, t::Int)
+    r"""
+    measure_y(s::SparseVector{ComplexF16,Int}, t::Int)
+
+Measure the quantum state `s` in the Y basis.
+
+
+# Arguments
+- `s`: A `SparseVector{ComplexF16,Int}` representing the quantum state.
+- `t`: An `Int` specifying the qubit index to be measured.
+
+# Returns
+- The measurement result in the Z basis as returned by `measure_z`.
+"""
     s_copy = copy(s)
     h!(s_copy, t)
     return measure_z(s_copy, t)
@@ -206,6 +265,19 @@ end
 # To measure in the Y basis, apply a rotation around the X axis by π/2.
 # This maps the eigenstates of Y into the Z basis.
 function measure_y(s::SparseVector{ComplexF16,Int}, t::Int)
+    r"""
+    measure_y(s::SparseVector{ComplexF16,Int}, t::Int)
+
+Measure the quantum state `s` in the Y basis.
+
+
+# Arguments
+- `s`: A `SparseVector{ComplexF16,Int}` representing the quantum state.
+- `t`: An `Int` specifying the qubit index to be measured.
+
+# Returns
+- The measurement result in the Z basis as returned by `measure_z`.
+"""
     s_copy = copy(s)
     rx!(s_copy, t, π/2)
     return measure_z(s_copy, t)
@@ -214,6 +286,19 @@ end
 
 
 function prstate(s::SparseVector{ComplexF16,Int})
+    r"""
+    prstate(s::SparseVector{ComplexF16,Int})
+
+Print the quantum state in a human-readable format.
+
+For each basis state with amplitude above a small threshold, the function prints the basis state in binary (padded to the number of qubits) along with its amplitude.
+
+# Arguments
+- `s`: A `SparseVector{ComplexF16,Int}` representing the quantum state.
+
+# Returns
+- Nothing. The state is printed to standard output.
+"""
     n = nb(s)
     vec = Array(s)
     println("Quantum State:")
