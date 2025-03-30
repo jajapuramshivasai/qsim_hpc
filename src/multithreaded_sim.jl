@@ -2,13 +2,11 @@ module multithreaded_sim
 
 using LinearAlgebra, SparseArrays, Base.Threads, Polyester
 
-export sparse_vector,
-       apply_unitary!, apply_unitary_on_qubit!,
-       apply_hadamard!, apply_pauli_x!, apply_pauli_y!, apply_pauli_z!,
-       apply_rotation_x!, apply_rotation_y!, apply_rotation_z!,
-       apply_cnot!, apply_controlled_rotation_x!, apply_controlled_rotation_y!, apply_controlled_rotation_z!,
-       apply_swap!,
-       measurement_probability, print_state
+export c1, im_F16, I2, H, X, Y, Z, P0, P1,
+       ThreadedSparseMatrix,
+       h!, x!, y!, z!,
+       rx!, ry!, rz!,
+       crx!, cry!, crz!,measure,print_state
 
 # Core Constants and Operators
 const c1 = ComplexF16(1)
