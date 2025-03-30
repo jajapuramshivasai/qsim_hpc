@@ -47,6 +47,9 @@ function id(n::Int)
 end
 
 function sv(n::Int, m::Int)
+    r"
+    Creates a sparse vector of length 2^n with the m-th element set to 1.
+    "
     s = spzeros(ComplexF16, 1 << n)
     s[m+1] = c1
     s
@@ -55,6 +58,9 @@ end
 nb(s::SparseVector{ComplexF16,Int}) = round(Int, log2(length(s)))
 
 function u!(s::SparseVector{ComplexF16,Int}, U::SparseMatrixCSC{ComplexF16,Int})
+    r"
+    Applies the unitary matrix U to the quantum state s.
+    "
     size(U, 2) == length(s) || error("Dimension mismatch")
     result = spzeros(ComplexF16, size(U, 1))
     rows = rowvals(U)
