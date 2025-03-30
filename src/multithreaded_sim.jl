@@ -2,7 +2,7 @@ module QSim_MT
 
 using LinearAlgebra, SparseArrays, Base.Threads, Polyester
 
-export statevector, u!, h!, x!, y!, z!, rx!, ry!, rz!, 
+export statevector, u!,u2!, h!, x!, y!, z!, rx!, ry!, rz!, 
        cnot!, crx!, cry!, crz!, swap!, mp, prstate,measure
 
 # Core Constants and Operators
