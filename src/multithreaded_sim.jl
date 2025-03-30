@@ -1,12 +1,9 @@
-module multithreaded_sim
+module QSim_MT
 
 using LinearAlgebra, SparseArrays, Base.Threads, Polyester
 
-export c1, im_F16, I2, H, X, Y, Z, P0, P1,
-       ThreadedSparseMatrix,
-       h!, x!, y!, z!,
-       rx!, ry!, rz!,
-       crx!, cry!, crz!,measure,print_state
+export sv, u!, h!, x!, y!, z!, rx!, ry!, rz!, 
+       cnot!, crx!, cry!, crz!, swap!, mp, prstate,measure
 
 # Core Constants and Operators
 const c1 = ComplexF16(1)
@@ -20,26 +17,33 @@ const Z = sparse(ComplexF16[1 0; 0 -1])
 const P0 = sparse(ComplexF16[1 0; 0 0])
 const P1 = sparse(ComplexF16[0 0; 0 1])
 
-# Thread-safe Sparse Matrix Operations
-struct ThreadedSparseMatrix{Tv,Ti}
+# Threaded Sparse Matrix Type with Full Array Interface
+struct ThreadedSparseMatrix{Tv,Ti<:Integer}
     mat::SparseMatrixCSC{Tv,Ti}
 end
 
+# Array interface implementations
+Base.parent(tsm::ThreadedSparseMatrix) = tsm.mat
 Base.size(tsm::ThreadedSparseMatrix) = size(tsm.mat)
-Base.getindex(tsm::ThreadedSparseMatrix, I...) = tsm.mat[I...]
+Base.size(tsm::ThreadedSparseMatrix, dim::Integer) = size(tsm.mat, dim)
+Base.ndims(tsm::ThreadedSparseMatrix) = 2
+Base.axes(tsm::ThreadedSparseMatrix) = axes(tsm.mat)
+Base.axes(tsm::ThreadedSparseMatrix, dim::Integer) = axes(tsm.mat, dim)
 
+# Sparse matrix interface
+SparseArrays.issparse(::ThreadedSparseMatrix) = true
+SparseArrays.nnz(tsm::ThreadedSparseMatrix) = nnz(tsm.mat)
+SparseArrays.nonzeros(tsm::ThreadedSparseMatrix) = nonzeros(tsm.mat)
+SparseArrays.rowvals(tsm::ThreadedSparseMatrix) = rowvals(tsm.mat)
+SparseArrays.getcolptr(tsm::ThreadedSparseMatrix) = getcolptr(tsm.mat)
+
+# Threaded matrix-vector multiplication
 function Base.:*(A::ThreadedSparseMatrix{ComplexF16,Int}, b::SparseVector{ComplexF16,Int})
-    r"""
-    Multiplies a threaded sparse matrix A by a sparse vector b.
-    
-    Returns:
-        A new sparse vector representing the product.
-    """
     result = spzeros(ComplexF16, size(A, 1))
-    rows = rowvals(A.mat)
-    vals = nonzeros(A.mat)
+    rows = rowvals(A)
+    vals = nonzeros(A)
     
-    @threads for col in 1:size(A.mat, 2)
+    @threads for col in 1:size(A, 2)
         if b[col] != 0
             @inbounds for i in nzrange(A.mat, col)
                 row = rows[i]
@@ -50,31 +54,20 @@ function Base.:*(A::ThreadedSparseMatrix{ComplexF16,Int}, b::SparseVector{Comple
     result
 end
 
-# Identity and State Vector Constructors
+# Core quantum operations (remainder of implementation)
+function id(n::Int)
+    n == 0 ? sparse([c1]) : spdiagm(0 => ones(ComplexF16, 1 << n))
+end
 
-identity_operator(n::Int) = n == 0 ? sparse([c1]) : spdiagm(0 => ones(ComplexF16, 1 << n))
-
-
-function statevector(n::Int, m::Int)
-    r"
-    Returns a sparse vector representing the quantum state |m⟩ of n qubits.
-    "
+function sv(n::Int, m::Int)
     s = spzeros(ComplexF16, 1 << n)
     s[m+1] = c1
     s
 end
 
+nb(s::SparseVector{ComplexF16,Int}) = round(Int, log2(length(s)))
 
-num_qubits(s::SparseVector{ComplexF16,Int}) = round(Int, log2(length(s)))
-
-# Unitary Operations
-
-function apply_unitary!(s::SparseVector{ComplexF16,Int}, U::SparseMatrixCSC{ComplexF16,Int})
-    r"""
-    apply_unitary!(s::SparseVector{ComplexF16,Int}, U::SparseMatrixCSC{ComplexF16,Int})
-
-    Applies the unitary matrix `U` to the quantum state vector `s`.
-    """
+function u!(s::SparseVector{ComplexF16,Int}, U::SparseMatrixCSC{ComplexF16,Int})
     size(U, 2) == length(s) || error("Dimension mismatch")
     result = spzeros(ComplexF16, size(U, 1))
     rows = rowvals(U)
@@ -89,167 +82,146 @@ function apply_unitary!(s::SparseVector{ComplexF16,Int}, U::SparseMatrixCSC{Comp
         end
     end
     s[:] = result
+    dropzeros!(s) #experimental may remove later
 end
 
-
-function apply_unitary_on_qubit!(s::SparseVector{ComplexF16,Int}, t::Int, U::SparseMatrixCSC{ComplexF16,Int})
-    r"""
-    apply_unitary_on_qubit!(s::SparseVector{ComplexF16,Int}, t::Int, U::SparseMatrixCSC{ComplexF16,Int})
-
-    Applies the unitary matrix `U` on the qubit at position `t` in the quantum state `s`.
-    """
-    q = num_qubits(s)
+function u!(s::SparseVector{ComplexF16,Int}, t::Int, U::SparseMatrixCSC{ComplexF16,Int})
+    q = nb(s)
     l = t - 1
     r = q - t
-    s[:] = ThreadedSparseMatrix(kron(identity_operator(r), kron(U, identity_operator(l)))) * s
+    s[:] = ThreadedSparseMatrix(kron(id(r), kron(U, id(l)))) * s
+    dropzeros!(s) #experimental may remove later
 end
 
-# Gate Definitions
+# Gate definitions
+h!(s::SparseVector{ComplexF16,Int}, t::Int) = u!(s, t, H)
+x!(s::SparseVector{ComplexF16,Int}, t::Int) = u!(s, t, X)
+y!(s::SparseVector{ComplexF16,Int}, t::Int) = u!(s, t, Y)
+z!(s::SparseVector{ComplexF16,Int}, t::Int) = u!(s, t, Z)
 
-h!(s::SparseVector{ComplexF16,Int}, t::Int) = apply_unitary_on_qubit!(s, t, H)
-
-
-x!(s::SparseVector{ComplexF16,Int}, t::Int) = apply_unitary_on_qubit!(s, t, X)
-
-
-y!(s::SparseVector{ComplexF16,Int}, t::Int) = apply_unitary_on_qubit!(s, t, Y)
-
-
-z!(s::SparseVector{ComplexF16,Int}, t::Int) = apply_unitary_on_qubit!(s, t, Z)
-
-# Rotation Gate Matrices and Operations
-
-function rotation_x_gate(theta::Real)
-    r"""
-    rotation_x_gate(theta::Real) -> SparseMatrixCSC
-
-    Computes the matrix representation of the RX rotation gate for angle `theta`.
-    """
+# Rotation gates
+function rx_gate(theta::Real)
     c = ComplexF16(cos(theta/2))
     s = ComplexF16(sin(theta/2))
     c*I2 - im_F16*s*X
 end
 
-function rotation_y_gate(theta::Real)
-    r"""
-        rotation_y_gate(theta::Real) -> SparseMatrixCSC
-    
-    Computes the matrix representation of the RY rotation gate for angle `theta`.
-    """
+function ry_gate(theta::Real)
     c = ComplexF16(cos(theta/2))
     s = ComplexF16(sin(theta/2))
     c*I2 - im_F16*s*Y
 end
 
-
-function rotation_z_gate(theta::Real)
-    r"""
-    rotation_z_gate(theta::Real) -> SparseMatrixCSC
-
-    Computes the matrix representation of the RZ rotation gate for angle `theta`.
-    """
+function rz_gate(theta::Real)
     c = ComplexF16(cos(theta/2))
     s = ComplexF16(sin(theta/2))
     c*I2 - im_F16*s*Z
 end
 
+rx!(s::SparseVector{ComplexF16,Int}, t::Int, theta::Real) = u!(s, t, rx_gate(theta))
+ry!(s::SparseVector{ComplexF16,Int}, t::Int, theta::Real) = u!(s, t, ry_gate(theta))
+rz!(s::SparseVector{ComplexF16,Int}, t::Int, theta::Real) = u!(s, t, rz_gate(theta))
 
-rx!(s::SparseVector{ComplexF16,Int}, t::Int, theta::Real) = apply_unitary_on_qubit!(s, t, rotation_x_gate(theta))
 
-ry!(s::SparseVector{ComplexF16,Int}, t::Int, theta::Real) = apply_unitary_on_qubit!(s, t, rotation_y_gate(theta))
+function controlled!(s::SparseVector{ComplexF16,Int}, c::Int, t::Int, V::SparseMatrixCSC{ComplexF16,Int})
+    # Total number of qubits in state vector
+    q = nb(s)
 
-
-rz!(s::SparseVector{ComplexF16,Int}, t::Int, theta::Real) = apply_unitary_on_qubit!(s, t, rotation_z_gate(theta))
-
-# Controlled Operations
-
-function apply_controlled_gate!(s::SparseVector{ComplexF16,Int}, c::Int, t::Int, V::SparseMatrixCSC{ComplexF16,Int})
-    r"""
-    apply_controlled_gate!(s::SparseVector{ComplexF16,Int}, c::Int, t::Int, V::SparseMatrixCSC{ComplexF16,Int})
-
-    Applies the controlled gate defined by unitary matrix `V` 
-    with control qubit `c` and target qubit `t` on the state `s`.
-    """
-    q = num_qubits(s)
+    # Identify lower and higher indices
     a = min(c, t)
     b = max(c, t)
-    left = identity_operator(q - b)
-    right = identity_operator(a - 1)
-    mid = (b - a - 1) > 0 ? identity_operator(b - a - 1) : sparse([c1])
-    
-    U2 = c < t ? kron(identity_operator(1), P0) + kron(V, P1) :
-                 kron(P0, identity_operator(1)) + kron(P1, V)
+
+    # Build identity operators for regions outside control/target pair
+    left = id(q - b)              # Qubits more significant than b
+    right = id(a - 1)             # Qubits less significant than a
+    mid = (b - a - 1) > 0 ? id(b - a - 1) : sparse([c1]) # Intermediate
+
+    # Construct two-qubit controlled operator
+    U2 = if c < t
+        kron(id(1), P0) + kron(V, P1)
+    else
+        kron(P0, id(1)) + kron(P1, V)
+    end
+
+    # Assemble full operator on q-qubit Hilbert space
     U_full = ThreadedSparseMatrix(kron(left, kron(U2, kron(mid, right))))
+
+    # Apply operator to state vector
     s[:] = U_full * s
+
+    # Remove near-zero entries from sparse vector
+    dropzeros!(s)
+
+    return s
 end
 
-"""
-    apply_cnot!(s::SparseVector{ComplexF16,Int}, c::Int, t::Int)
 
-Applies the CNOT gate with control qubit `c` and target qubit `t`
-to the state `s`.
-"""
-cnot!(s::SparseVector{ComplexF16,Int}, c::Int, t::Int) = apply_controlled_gate!(s, c, t, X)
 
-"""
-    apply_controlled_rotation_x!(s::SparseVector{ComplexF16,Int}, c::Int, t::Int, theta::Real)
+cnot!(s::SparseVector{ComplexF16,Int}, c::Int, t::Int) = controlled!(s, c, t, X)
+crx!(s::SparseVector{ComplexF16,Int}, c::Int, t::Int, theta::Real) = controlled!(s, c, t, rx_gate(theta))
+cry!(s::SparseVector{ComplexF16,Int}, c::Int, t::Int, theta::Real) = controlled!(s, c, t, ry_gate(theta))
+crz!(s::SparseVector{ComplexF16,Int}, c::Int, t::Int, theta::Real) = controlled!(s, c, t, rz_gate(theta))
 
-Applies the controlled RX gate with control qubit `c` and target qubit `t` 
-and rotation angle `theta` on state `s`.
-"""
-crx!(s::SparseVector{ComplexF16,Int}, c::Int, t::Int, theta::Real) = apply_controlled_gate!(s, c, t, rotation_x_gate(theta))
-
-"""
-    apply_controlled_rotation_y!(s::SparseVector{ComplexF16,Int}, c::Int, t::Int, theta::Real)
-
-Applies the controlled RY gate with control qubit `c` and target qubit `t` 
-and rotation angle `theta` on state `s`.
-"""
-cry!(s::SparseVector{ComplexF16,Int}, c::Int, t::Int, theta::Real) = apply_controlled_gate!(s, c, t, rotation_y_gate(theta))
-
-"""
-    apply_controlled_rotation_z!(s::SparseVector{ComplexF16,Int}, c::Int, t::Int, theta::Real)
-
-Applies the controlled RZ gate with control qubit `c` and target qubit `t` 
-and rotation angle `theta` on state `s`.
-"""
-crz!(s::SparseVector{ComplexF16,Int}, c::Int, t::Int, theta::Real) = apply_controlled_gate!(s, c, t, rotation_z_gate(theta))
-
-# SWAP Implementation
 
 function swap!(s::SparseVector{ComplexF16,Int}, q1::Int, q2::Int)
-    "
-    apply_swap!(s::SparseVector{ComplexF16,Int}, q1::Int, q2::Int)
+    q = nb(s)
+    if q1 > q || q2 > q
+        error("Qubit index out of range")
+    end
+    if q1 == q2
+        return
+    end
+    cnot!(s, q1, q2)
+    cnot!(s, q2, q1)
+    cnot!(s, q1, q2)
+end
+# Measurement and Output
+mp(s::SparseVector{ComplexF16,Int}) = abs2.(s)
 
-    Swaps the states of qubits `q1` and `q2` in the quantum state `s` using
-    three consecutive CNOT gates.
-    "
-    q1 == q2 && return
-    apply_cnot!(s, q1, q2)
-    apply_cnot!(s, q2, q1)
-    apply_cnot!(s, q1, q2)
+function measure_z(s::SparseVector{ComplexF16,Int}, t::Int)
+    n = nb(s)
+    probs = mp(s)
+    p0 = 0.0
+    p1 = 0.0
+    for i in 0:(length(probs)-1)
+        # Since the gate application functions assume qubit 1 is LSB,
+        # extract tth qubit bit by shifting (t-1) bits.
+        bit = (i >> (t-1)) & 1
+        if bit == 0
+            p0 += probs[i+1]
+        else
+            p1 += probs[i+1]
+        end
+    end
+    return (p0, p1)
+end
+
+# To measure in the X basis, first apply a Hadamard gate (rotates X⇔Z)
+function measure_x(s::SparseVector{ComplexF16,Int}, t::Int)
+    s_copy = copy(s)
+    h!(s_copy, t)
+    return measure_z(s_copy, t)
+end
+
+# To measure in the Y basis, apply a rotation around the X axis by π/2.
+# This maps the eigenstates of Y into the Z basis.
+function measure_y(s::SparseVector{ComplexF16,Int}, t::Int)
+    s_copy = copy(s)
+    rx!(s_copy, t, π/2)
+    return measure_z(s_copy, t)
 end
 
 
-measure(s::SparseVector{ComplexF16,Int}) = abs2.(s)
 
-
-function print_state(s::SparseVector{ComplexF16,Int})
-    
-    r"
-    print_state(s::SparseVector{ComplexF16,Int})
-
-    Prints the quantum state represented by `s` in the computational basis.
-    Only states with non-negligible amplitude are displayed.
-    "
+function prstate(s::SparseVector{ComplexF16,Int})
+    n = nb(s)
     vec = Array(s)
     println("Quantum State:")
     @threads for i in 0:(length(vec)-1)
         a = vec[i+1]
-        if abs(a) > 1e-10
-            println("|", lpad(string(i, base=2), n, '0'), "⟩: ", a)
-        end
+        abs(a) > 1e-10 && println("|", lpad(string(i, base=2), n, '0'), "⟩: ", a)
     end
 end
 
 end # module
+
