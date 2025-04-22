@@ -84,16 +84,32 @@ function h!(s::Vector{ComplexF16}, t::Int)
     u2!(s, t, H)
 end
 
+function h!(rho::Matrix{ComplexF16}, t::Int)
+    u2!(rho, t, H)
+end
+
 function x!(s::Vector{ComplexF16}, t::Int)
     u2!(s, t, X)
+end
+
+function x!(rho::Matrix{ComplexF16}, t::Int)
+    u2!(rho, t, X)
 end
 
 function y!(s::Vector{ComplexF16}, t::Int)
     u2!(s, t, Y)
 end
 
+function y!(rho::Matrix{ComplexF16}, t::Int)
+    u2!(rho, t, Y)
+end
+
 function z!(s::Vector{ComplexF16}, t::Int)
     u2!(s, t, Z)
+end
+
+function z!(rho::Matrix{ComplexF16}, t::Int)
+    u2!(rho, t, Z)
 end
 
 # Rotation gates
@@ -116,28 +132,27 @@ function rz_gate(theta::Real)
 end
 
 function rx!(s::Vector{ComplexF16}, t::Int, theta::Real)
-    # Optimization: Use precomputed gates for common angles
-    if theta ≈ π/2
-        u2!(s, t, RX_PI_2)
-    else
-        u2!(s, t, rx_gate(theta))
-    end
+    u2!(s, t, rx_gate(theta))
+end
+
+function rx!(rho::Matrix{ComplexF16}, t::Int, theta::Real)
+    u2!(rho, t, rx_gate(theta))
 end
 
 function ry!(s::Vector{ComplexF16}, t::Int, theta::Real)
-    if theta ≈ π/2
-        u2!(s, t, RY_PI_2)
-    else
-        u2!(s, t, ry_gate(theta))
-    end
+    u2!(s, t, ry_gate(theta))
+end
+
+function ry!(rho::Matrix{ComplexF16}, t::Int, theta::Real)
+    u2!(rho, t, ry_gate(theta))
 end
 
 function rz!(s::Vector{ComplexF16}, t::Int, theta::Real)
-    if theta ≈ π/2
-        u2!(s, t, RZ_PI_2)
-    else
-        u2!(s, t, rz_gate(theta))
-    end
+    u2!(s, t, rz_gate(theta))
+end
+
+function rz!(rho::Matrix{ComplexF16}, t::Int, theta::Real)
+    u2!(rho, t, rz_gate(theta))
 end
 
 # Controlled gates - optimized for dense matrices
