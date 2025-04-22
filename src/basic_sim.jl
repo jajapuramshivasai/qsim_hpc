@@ -188,16 +188,50 @@ function cnot!(s::Vector{ComplexF16}, c::Int, t::Int)
     controlled!(s, c, t, X)
 end
 
+function controlled!(rho::Matrix{ComplexF16}, c::Int, t::Int, V::Matrix{ComplexF16})
+    q = round(Int, log2(size(rho, 1)))
+    a = min(c, t)
+    b = max(c, t)
+    left = id(q - b)
+    right = id(a - 1)
+    # Use reshape([c1], 1, 1) to create a 1x1 matrix instead of a vector.
+    mid = (b - a - 1) > 0 ? id(b - a - 1) : reshape([c1], 1, 1)
+    U2 = if c < t
+        kron(id(1), P0) + kron(V, P1)
+    else
+        kron(P0, id(1)) + kron(P1, V)
+    end
+    op = kron(left, kron(U2, kron(mid, right)))
+    rho .= op * rho * op'
+    rho
+end
+
+function cnot!(rho::Matrix{ComplexF16}, c::Int, t::Int)
+    controlled!(rho, c, t, X)
+end
+
 function crx!(s::Vector{ComplexF16}, c::Int, t::Int, theta::Real)
     controlled!(s, c, t, rx_gate(theta))
+end
+
+function crx!(rho::Matrix{ComplexF16}, c::Int, t::Int, theta::Real)
+    controlled!(rho, c, t, rx_gate(theta))
 end
 
 function cry!(s::Vector{ComplexF16}, c::Int, t::Int, theta::Real)
     controlled!(s, c, t, ry_gate(theta))
 end
 
+function cry!(rho::Matrix{ComplexF16}, c::Int, t::Int, theta::Real)
+    controlled!(rho, c, t, ry_gate(theta))
+end
+
 function crz!(s::Vector{ComplexF16}, c::Int, t::Int, theta::Real)
     controlled!(s, c, t, rz_gate(theta))
+end
+
+function crz!(rho::Matrix{ComplexF16}, c::Int, t::Int, theta::Real)
+    controlled!(rho, c, t, rz_gate(theta))
 end
 
 function swap!(s::Vector{ComplexF16}, q1::Int, q2::Int)
@@ -206,14 +240,31 @@ function swap!(s::Vector{ComplexF16}, q1::Int, q2::Int)
         error("Qubit index out of range")
     end
     if q1 == q2
-        return
+        return s
     end
     cnot!(s, q1, q2)
     cnot!(s, q2, q1)
     cnot!(s, q1, q2)
+    s
+end
+
+function swap!(rho::Matrix{ComplexF16}, q1::Int, q2::Int)
+    q = round(Int, log2(size(rho, 1)))
+    if q1 > q || q2 > q
+        error("Qubit index out of range")
+    end
+    if q1 == q2
+        return rho
+    end
+    cnot!(rho, q1, q2)
+    cnot!(rho, q2, q1)
+    cnot!(rho, q1, q2)
+    rho
 end
 
 mp(s::Vector{ComplexF16}) = abs2.(s)
+
+mp(rho::Matrix{ComplexF16}) = real.(diag(rho))
 
 function measure_z(s::Vector{ComplexF16}, t::Int)
     n = nb(s)
@@ -247,6 +298,37 @@ function measure_y(s::Vector{ComplexF16}, t::Int)
     return measure_z(s_copy, t)
 end
 
+function measure_z(rho::Matrix{ComplexF16}, t::Int)
+    q = round(Int, log2(size(rho, 1)))
+    probs = real.(diag(rho))
+    p0 = 0.0
+    p1 = 0.0
+    t_mask = 1 << (t - 1)
+    for i in 0:(length(probs) - 1)
+        if probs[i + 1] > 1e-10
+            if (i & t_mask) == 0
+                p0 += probs[i + 1]
+            else
+                p1 += probs[i + 1]
+            end
+        end
+    end
+    return (p0, p1)
+end
+
+function measure_x(rho::Matrix{ComplexF16}, t::Int)
+    rho_copy = copy(rho)
+    h!(rho_copy, t)
+    return measure_z(rho_copy, t)
+end
+
+function measure_y(rho::Matrix{ComplexF16}, t::Int)
+    rho_copy = copy(rho)
+    rx!(rho_copy, t, π / 2)
+    return measure_z(rho_copy, t)
+end
+
+
 function prstate(s::Vector{ComplexF16})
     n = nb(s)
     for i in 0:(length(s)-1)
@@ -255,4 +337,13 @@ function prstate(s::Vector{ComplexF16})
     end
 end
 
+function prstate(x::Matrix{ComplexF16})
+    q = round(Int, log2(size(x, 1)))
+    probs = mp(x)
+    for i in 0:(size(x, 1) - 1)
+        p = probs[i + 1]
+        abs(p) > 1e-10 && println("|", lpad(string(i, base=2), q, '0'), "⟩ : ", p)
+    end
+    nothing
+end
 end # module
