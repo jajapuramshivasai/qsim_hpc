@@ -3,7 +3,7 @@ module QSim_base
 using LinearAlgebra
 
 export statevector, u!, u2!, h!, x!, y!, z!, rx!, ry!, rz!, 
-       cnot!, crx!, cry!, crz!, swap!, mp, prstate, measure, density_matrix
+       cnot!, crx!, cry!, crz!, swap!, mp, prstate, measure_x,measure_y,measure_z, density_matrix ,expectation
 
 # Core Constants 
 const c1 = ComplexF64(1)
@@ -47,6 +47,7 @@ function density_matrix(n::Int, m::Int)
 end
 
 nb(s::Vector{ComplexF64}) = round(Int, log2(length(s)))
+nb(rho::Matrix{ComplexF64}) = round(Int, log2(size(rho, 1)))
 
 # State vector operations
 function u!(s::Vector{ComplexF64}, U::Matrix{ComplexF64})
@@ -380,17 +381,16 @@ function measure_y(rho::Matrix{ComplexF64}, t::Int)
     return measure_z(rho_copy, t)
 end
 
-# Unified measure function
-function measure(s::Union{Vector{ComplexF64}, Matrix{ComplexF64}}, t::Int, basis::Symbol=:z)
-    if basis == :z
-        return measure_z(s, t)
-    elseif basis == :x
-        return measure_x(s, t)
-    elseif basis == :y
-        return measure_y(s, t)
-    else
-        error("Unknown measurement basis. Use :x, :y, or :z")
-    end
+function expectation(x::Vector{ComplexF64}, observable::Function, t::Int)
+    x_conj = copy(x)'
+    e = x_conj * observable(x, t) 
+    return e
+end
+
+function expectation(rho::Matrix{ComplexF64}, observable::Function, t::Int)
+    r = nb(rho)
+    e = trace(rho * observable(id(r), t))
+    return e
 end
 
 function prstate(s::Vector{ComplexF64})
