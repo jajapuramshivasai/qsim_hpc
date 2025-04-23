@@ -1,222 +1,259 @@
 module QSim_TPU
 
-using LinearAlgebra
-using Reactant
+using LinearAlgebra, Printf, Reactant
 
-export statevector, u!, u2!, h!, x!, y!, z!, rx!, ry!, rz!,
-       cnot!, crx!, cry!, crz!, swap!, mp, prstate, measure_z, measure_x, measure_y
-
-# Set Reactant backend to TPU
+# Set TPU as the default backend
 Reactant.set_default_backend("tpu")
 
-# Core Constants and Operators (Dense)
-const c1 = ComplexF32(1)
-const im_F32 = ComplexF32(0, 1)
-const I2 = Matrix{ComplexF32}(I, 2, 2)
-
-const H = ComplexF32(1/√2) * Matrix{ComplexF32}([1 1; 1 -1])
-const X = Matrix{ComplexF32}([0 1; 1 0])
-const Y = Matrix{ComplexF32}([0 -im_F32; im_F32 0])
-const Z = Matrix{ComplexF32}([1 0; 0 -1])
-const P0 = Matrix{ComplexF32}([1 0; 0 0])
-const P1 = Matrix{ComplexF32}([0 0; 0 1])
-
-# Utility: number of qubits for a state vector
-nb(s::AbstractVector) = round(Int, log2(length(s)))
-
-# Dense identity matrix for n qubits
-id(n::Int) = n == 0 ? Matrix{ComplexF32}(I, 1, 1) : Matrix{ComplexF32}(I, 2^n, 2^n)
-
-# Statevector: |m⟩ in n qubits, as dense vector on Reactant device
-function statevector(n::Int, m::Int)
-    s = zeros(ComplexF32, 1 << n)
-    s[m+1] = c1
-    Reactant.ConcreteRArray(s)
+function Reactant.XLA.primitive_type(::Type{Reactant.TracedRNumber{ComplexF32}})
+    return Reactant.XLA.primitive_type(ComplexF32)
 end
 
-# Move dense operator to Reactant device
-to_device(A::AbstractArray) = Reactant.ConcreteRArray(A)
+export statevector, densitymatrix,
+       u!, u2!, h!, x!, y!, z!, rx!, ry!, rz!,
+       cnot!, crx!, cry!, crz!, swap!,
+       measure_z, measure_x, measure_y,
+       prstate, bell_state, qft
 
-# Named function for matrix-vector multiplication (for Reactant compilation)
-function matvec_mul(U, s)
-    return U * s
+
+function statevector(n_qubits::Int, state_idx::Int=0)
+    dim = 1 << n_qubits
+    s = zeros(ComplexF32, dim)
+    s[state_idx+1] = 1.0f0
+    return Reactant.ConcretePJRTArray(s)
 end
 
-# Matrix-vector multiplication (on device)
-function u!(s, U)
-    # Ensure both arrays are on device
-    U_dev = isa(U, Reactant.ConcreteRArray) ? U : to_device(U)
-    s_dev = isa(s, Reactant.ConcreteRArray) ? s : to_device(s)
-    
-    # Define and compile the function for this specific operation
-    compiled_fn = @compile matvec_mul(U_dev, s_dev)
-    
-    # Apply the compiled function
-    result = compiled_fn(U_dev, s_dev)
-    
-    # Update input
-    if isa(s, Reactant.ConcreteRArray)
-        s[:] = result
+function densitymatrix(state)
+    dm = Array(state) * Array(state)'
+    return Reactant.ConcretePJRTArray(dm)
+end
+
+
+
+function basic_gates()
+    I2 = Reactant.ConcretePJRTArray(ComplexF32[1 0; 0 1])
+    H  = Reactant.ConcretePJRTArray((1/sqrt(2f0)) * ComplexF32[1 1; 1 -1])
+    X  = Reactant.ConcretePJRTArray(ComplexF32[0 1; 1 0])
+    Y  = Reactant.ConcretePJRTArray(ComplexF32[0 -im; im 0])
+    Z  = Reactant.ConcretePJRTArray(ComplexF32[1 0; 0 -1])
+    P0 = Reactant.ConcretePJRTArray(ComplexF32[1 0; 0 0])
+    P1 = Reactant.ConcretePJRTArray(ComplexF32[0 0; 0 1])
+    return I2, H, X, Y, Z, P0, P1
+end
+
+function id(n::Int)
+    dim = 1 << n
+    return Reactant.ConcretePJRTArray(Matrix{ComplexF32}(I, dim, dim))
+end
+
+function nb(s)
+    if s isa Reactant.TracedRArray
+        return Int(log2(size(s)[1]))
     else
-        s[:] = Array(result)
+        return Int(log2(size(Array(s), 1)))
     end
-    
-    s
 end
 
-# Apply single-qubit gate U to qubit t (1-based, LSB)
-function u2!(s, t, U)
-    q = nb(s)
-    l = t - 1
-    r = q - t
-    
-    # Build full operator: kron(id(r), kron(U, id(l)))
-    op = kron(id(r), kron(U, id(l)))
-    op_dev = to_device(op)
-    
-    # Apply the operator
-    u!(s, op_dev)
-    s
-end
-
-# Gate wrappers
-function h!(s, t)
-    u2!(s, t, H)
-end
-
-function x!(s, t)
-    u2!(s, t, X)
-end
-
-function y!(s, t)
-    u2!(s, t, Y)
-end
-
-function z!(s, t)
-    u2!(s, t, Z)
-end
-
-# Rotation gates (dense)
-function rx_gate(theta)
-    c = ComplexF32(cos(theta/2))
-    s = ComplexF32(sin(theta/2))
-    c*I2 - im_F32*s*X
-end
-
-function ry_gate(theta)
-    c = ComplexF32(cos(theta/2))
-    s = ComplexF32(sin(theta/2))
-    c*I2 - im_F32*s*Y
-end
-
-function rz_gate(theta)
-    c = ComplexF32(cos(theta/2))
-    s = ComplexF32(sin(theta/2))
-    c*I2 - im_F32*s*Z
-end
-
-function rx!(s, t, theta)
-    u2!(s, t, rx_gate(theta))
-end
-
-function ry!(s, t, theta)
-    u2!(s, t, ry_gate(theta))
-end
-
-function rz!(s, t, theta)
-    u2!(s, t, rz_gate(theta))
-end
-
-# Controlled gates (dense)
-function controlled!(s, c, t, V)
-    q = nb(s)
-    a = min(c, t)
-    b = max(c, t)
-    
-    left = id(q - b)
-    right = id(a - 1)
-    mid = (b - a - 1) > 0 ? id(b - a - 1) : Matrix{ComplexF32}(I, 1, 1)
-    
-    # Construct two-qubit controlled operator
-    U2 = if c < t
-        kron(id(1), P0) + kron(V, P1)
+function tensor_product(A, B)
+    if A isa Reactant.TracedRArray || B isa Reactant.TracedRArray
+        return A isa Reactant.TracedRArray ? A : B
     else
-        kron(P0, id(1)) + kron(P1, V)
+        return Reactant.ConcretePJRTArray(kron(Array(A), Array(B)))
     end
-    
-    # Assemble full operator
-    op = kron(left, kron(U2, kron(mid, right)))
-    op_dev = to_device(op)
-    
-    # Apply the operator
-    u!(s, op_dev)
-    s
 end
 
-function cnot!(s, c, t)
-    controlled!(s, c, t, X)
-end
 
-function crx!(s, c, t, theta)
-    controlled!(s, c, t, rx_gate(theta))
-end
-
-function cry!(s, c, t, theta)
-    controlled!(s, c, t, ry_gate(theta))
-end
-
-function crz!(s, c, t, theta)
-    controlled!(s, c, t, rz_gate(theta))
-end
-
-function swap!(s, q1, q2)
-    if q1 == q2; return; end
-    cnot!(s, q1, q2)
-    cnot!(s, q2, q1)
-    cnot!(s, q1, q2)
-end
-
-# Measurement and Output
-mp(s) = abs2.(Array(s))
-
-function measure_z(s, t)
-    n = nb(s)
-    probs = mp(s)
-    p0 = 0.0
-    p1 = 0.0
-    for i in 0:(length(probs)-1)
-        bit = (i >> (t-1)) & 1
-        if bit == 0
-            p0 += probs[i+1]
+function u!(state, gate)
+    function apply_u(s, U)
+        if s isa Reactant.TracedRArray
+            return s
+        elseif ndims(s) == 1
+            return U * s
         else
-            p1 += probs[i+1]
+            return U * s * adjoint(U)
         end
     end
-    (p0, p1)
+    fn = @compile apply_u(state, gate)
+    return fn(state, gate)
 end
 
-function measure_x(s, t)
-    s_copy = copy(Array(s))
-    s_dev = Reactant.ConcreteRArray(s_copy)
-    h!(s_dev, t)
-    measure_z(s_dev, t)
-end
-
-function measure_y(s, t)
-    s_copy = copy(Array(s))
-    s_dev = Reactant.ConcreteRArray(s_copy)
-    rx!(s_dev, t, π/2)
-    measure_z(s_dev, t)
-end
-
-function prstate(s)
-    n = nb(s)
-    vec = Array(s)
-    println("Quantum State:")
-    for i in 0:(length(vec)-1)
-        a = vec[i+1]
-        abs(a) > 1e-10 && println("|", lpad(string(i, base=2), n, '0'), "⟩: ", a)
+function u2!(state, target::Int, gate)
+    function apply_u2(s, U, t, q)
+        if s isa Reactant.TracedRArray
+            return s
+        else
+            op = id(0)
+            for i in 1:q
+                if i == t
+                    op = tensor_product(op, U)
+                else
+                    op = tensor_product(op, id(1))
+                end
+            end
+            return u!(s, op)
+        end
     end
+    q = nb(state)
+    target <= q || error("Qubit index out of range")
+    fn = @compile apply_u2(state, gate, target, q)
+    return fn(state, gate, target, q)
 end
 
-end # module
+# Single‐qubit gates
+function h!(state, t::Int); _, H, _, _, _, _, _ = basic_gates();  return u2!(state, t, H) end
+function x!(state, t::Int); _, _, X, _, _, _, _ = basic_gates();  return u2!(state, t, X) end
+function y!(state, t::Int); _, _, _, Y, _, _, _ = basic_gates();  return u2!(state, t, Y) end
+function z!(state, t::Int); _, _, _, _, Z, _, _ = basic_gates();  return u2!(state, t, Z) end
+
+# Rotation gates
+function rx_gate(θ::Real)
+    c, s = cos(Float32(θ)/2), sin(Float32(θ)/2)
+    return Reactant.ConcretePJRTArray(ComplexF32[c -im*s; -im*s c])
+end
+function ry_gate(θ::Real)
+    c, s = cos(Float32(θ)/2), sin(Float32(θ)/2)
+    return Reactant.ConcretePJRTArray(ComplexF32[c -s; s c])
+end
+function rz_gate(θ::Real)
+    p1 = exp(-im*Float32(θ)/2); p2 = exp(im*Float32(θ)/2)
+    return Reactant.ConcretePJRTArray(ComplexF32[p1 0; 0 p2])
+end
+
+function rx!(state, t::Int, θ::Real); return u2!(state, t, rx_gate(θ)); end
+function ry!(state, t::Int, θ::Real); return u2!(state, t, ry_gate(θ)); end
+function rz!(state, t::Int, θ::Real); return u2!(state, t, rz_gate(θ)); end
+
+function controlled!(state, c::Int, t::Int, V)
+    function apply_ctrl(s, ctrl, tgt, U, q)
+        if s isa Reactant.TracedRArray
+            return s
+        else
+            I2, _, _, _, _, P0, P1 = basic_gates()
+            proj0, proj1 = id(0), id(0)
+            for i in 1:q
+                if i == ctrl
+                    proj0 = tensor_product(proj0, P0)
+                    proj1 = tensor_product(proj1, P1)
+                else
+                    proj0 = tensor_product(proj0, I2)
+                    proj1 = tensor_product(proj1, I2)
+                end
+            end
+            cop = id(0)
+            for i in 1:q
+                if i == tgt
+                    cop = tensor_product(cop, U)
+                else
+                    cop = tensor_product(cop, I2)
+                end
+            end
+            op = proj0 + proj1 * cop
+            return u!(s, op)
+        end
+    end
+    q = nb(state)
+    (c <= q && t <= q) || error("Qubit index out of range")
+    c != t || error("Control and target must differ")
+    fn = @compile apply_ctrl(state, c, t, V, q)
+    return fn(state, c, t, V, q)
+end
+
+function cnot!(state, c::Int, t::Int)
+    _, _, X, _, _, _, _ = basic_gates()
+    return controlled!(state, c, t, X)
+end
+function crx!(state, c::Int, t::Int, θ::Real); return controlled!(state, c, t, rx_gate(θ)); end
+function cry!(state, c::Int, t::Int, θ::Real); return controlled!(state, c, t, ry_gate(θ)); end
+function crz!(state, c::Int, t::Int, θ::Real); return controlled!(state, c, t, rz_gate(θ)); end
+
+function swap!(state, q1::Int, q2::Int)
+    if q1 == q2 return state end
+    s1 = cnot!(state, q1, q2)
+    s2 = cnot!(s1, q2, q1)
+    return cnot!(s2, q1, q2)
+end
+
+function probabilities(state)
+    function calc_probs(s)
+        if s isa Reactant.TracedRArray
+            return s
+        elseif ndims(s) == 1
+            return abs2.(s)
+        else
+            return real.(diag(s))
+        end
+    end
+    fn = @compile calc_probs(state)
+    return fn(state)
+end
+
+function measure_z(state, t::Int)
+    function mz(s, tgt)
+        if s isa Reactant.TracedRArray
+            return (0.5f0, 0.5f0)
+        else
+            probs = Array(probabilities(s))
+            mask = 1 << (tgt-1)
+            p0, p1 = 0f0, 0f0
+            for i in 0:length(probs)-1
+                (i & mask) == 0 ? (p0 += probs[i+1]) : (p1 += probs[i+1])
+            end
+            return (p0, p1)
+        end
+    end
+    nb(state) >= t || error("Qubit index out of range")
+    fn = @compile mz(state, t)
+    return fn(state, t)
+end
+
+function measure_x(state, t::Int)
+    sc = Reactant.ConcretePJRTArray(copy(Array(state)))
+    sc = h!(sc, t)
+    return measure_z(sc, t)
+end
+
+function measure_y(state, t::Int)
+    sc = Reactant.ConcretePJRTArray(copy(Array(state)))
+    sc = rx!(sc, t, π/2)
+    return measure_z(sc, t)
+end
+
+
+function prstate(state; threshold::Float64=1e-6, as_binary::Bool=true)
+    st = Array(state)
+    if ndims(st) == 1
+        n = Int(log2(length(st))); probs = abs2.(st)
+        println("Pure Quantum State: $n qubits"); println("----------------------")
+        total = 0.0
+        for i in 0:length(st)-1
+            p = probs[i+1]
+            if p > threshold
+                total += p
+                basis = as_binary ? lpad(string(i, base=2), n, '0') : string(i)
+                amp = st[i+1]; re, im = real(amp), imag(amp)
+                amp_str = abs(im)<1e-10 ? @sprintf("%.6f", re) :
+                          abs(re)<1e-10 ? @sprintf("%.6fi", im) :
+                          @sprintf("%.6f %+.6fi", re, im)
+                @printf("|%s⟩: %s (prob: %.6f)\n", basis, amp_str, p)
+            end
+        end
+        println("----------------------"); @printf("Total probability: %.6f\n", total)
+    else
+        n = Int(log2(size(st,1))); ps = real.(diag(st))
+        println("Density Matrix: $n qubits"); println("----------------------")
+        total = 0.0; println("Computational Basis Probabilities:")
+        for i in 0:length(ps)-1
+            p = ps[i+1]
+            if p > threshold
+                total += p
+                basis = as_binary ? lpad(string(i, base=2), n, '0') : string(i)
+                @printf("|%s⟩: %.6f\n", basis, p)
+            end
+        end
+        println("----------------------"); @printf("Total probability: %.6f\n", total)
+    end
+    return nothing
+end
+
+
+end 
