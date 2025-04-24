@@ -1,6 +1,7 @@
 include("../algorithms/GHZ.jl")
 using BenchmarkTools
 
+println("Number of threads: $(Threads.nthreads())")
 
 GHZ(4)
 
