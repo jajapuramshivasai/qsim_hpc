@@ -36,3 +36,4 @@ println("Qubit 2 measurement probabilities: |0⟩ = $(m2[1]), |1⟩ = $(m2[2])")
 # Print correlation information
 println("\nThis Bell state should show perfect correlation between the qubits.")
 
+

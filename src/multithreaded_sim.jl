@@ -39,19 +39,38 @@ SparseArrays.getcolptr(tsm::ThreadedSparseMatrix) = getcolptr(tsm.mat)
 
 # Threaded matrix-vector multiplication
 function Base.:*(A::ThreadedSparseMatrix{ComplexF16,Int}, b::SparseVector{ComplexF16,Int})
-    result = spzeros(ComplexF16, size(A, 1))
+    num_threads = Threads.nthreads()
+    result_dim = size(A, 1)
     rows = rowvals(A)
     vals = nonzeros(A)
     
+    # Create a separate result vector for each thread
+    thread_results = [spzeros(ComplexF16, result_dim) for _ in 1:num_threads]
+    
     @threads for col in 1:size(A, 2)
         if b[col] != 0
+            # Get the current thread's result vector
+            thread_id = Threads.threadid()
+            thread_result = thread_results[thread_id]
+            
             @inbounds for i in nzrange(A.mat, col)
                 row = rows[i]
-                result[row] += vals[i] * b[col]
+                thread_result[row] += vals[i] * b[col]
             end
         end
     end
-    result
+    
+    # Combine results from all threads
+    final_result = spzeros(ComplexF16, result_dim)
+    for thread_result in thread_results
+        for i in 1:length(thread_result.nzind)
+            row = thread_result.nzind[i]
+            val = thread_result.nzval[i]
+            final_result[row] += val
+        end
+    end
+    
+    return final_result
 end
 
 # Core quantum operations (remainder of implementation)
