@@ -1,0 +1,10 @@
+[deps]
+BenchmarkTools = "0f1e0344-0cd0-11e9-1be4-785095bdd9b2"
+Polyester      = "b48f30a7-985a-549d-ad68-235b2cf4faced"
+Reactant       = "INSERT-REACTANT-UUID-HERE"
+
+[compat]
+julia = "1.6"
+BenchmarkTools = ">=0.7"
+Polyester      = ">=0.1"
+Reactant       = ">=0.1"
