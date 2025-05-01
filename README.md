@@ -30,7 +30,7 @@ A high-performance quantum circuit simulator implemented in Julia, featuring mul
 1. Ensure you have Julia 1.6 or later installed
 2. Clone this repository:
    ```bash
-   git clone https://github.com/yourusername/qsim_hpc.git
+   git clone https://github.com/jajapuramshivasai/qsim_hpc.git
    cd qsim_hpc
    ```
 3. Start Julia and instantiate the project:
