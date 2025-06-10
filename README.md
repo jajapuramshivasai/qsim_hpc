@@ -76,6 +76,14 @@ result = grovers_search(oracle, 5, 3)  # 5 qubits, 3 iterations
 qft_state = QFT(3, ψ)
 ```
 
+### Running Tests
+
+To run the tests, activate the project and execute the test suite:
+
+```bash
+julia --project=. test/algorithms/tests/runtests.jl
+```
+
 ## Benchmarks
 
 To run benchmarks:
