@@ -2,15 +2,15 @@ module QSimTPU
 
 using Reactant, LinearAlgebra, Printf, Random, BenchmarkTools
 
-export statevector_tpu, densitymatrix_tpu, u_tpu!, u2_tpu!, h_tpu!, x_tpu!, y_tpu!, z_tpu!,
-       rx_tpu!, ry_tpu!, rz_tpu!, cnot_tpu!, crx_tpu!, cry_tpu!, crz_tpu!, swap_tpu!,
-       measure_z_tpu, measure_x_tpu, measure_y_tpu, probabilities_tpu,
-       bell_state_tpu, qft_tpu, prstate_tpu, benchmark_quantum_ops, controlled_tpu!
+export statevector, densitymatrix, u!, u2!, h!, x!, y!, z!,
+       rx!, ry!, rz!, cnot!, crx!, cry!, crz!, swap!,
+       measure_z, measure_x, measure_y, probabilities,
+       bell_state, qft, prstate, benchmark_quantum_ops, controlled!
 
 # ====== TPU-Optimized Core Operations ======
 
 # Initialize TPU-optimized state vector
-function statevector_tpu(n_qubits::Int, state_idx::Int=0)
+function statevector(n_qubits::Int, state_idx::Int=0)
     dim = 1 << n_qubits
     s = zeros(ComplexF32, dim)
     s[state_idx+1] = 1.0f0 + 0.0f0im
@@ -18,19 +18,19 @@ function statevector_tpu(n_qubits::Int, state_idx::Int=0)
 end
 
 # Initialize TPU-optimized density matrix
-function densitymatrix_tpu(state::Reactant.ConcreteRArray)
+function densitymatrix(state::Reactant.ConcreteRArray)
     state_cpu = Array(state)
     dm = state_cpu * state_cpu'
     return Reactant.ConcreteRArray(dm)
 end
 
-function densitymatrix_tpu(n_qubits::Int, state_idx::Int=0)
-    state = statevector_tpu(n_qubits, state_idx)
-    return densitymatrix_tpu(state)
+function densitymatrix(n_qubits::Int, state_idx::Int=0)
+    state = statevector(n_qubits, state_idx)
+    return densitymatrix(state)
 end
 
 # TPU-optimized matrix operations
-function tpu_matrix_vector_multiply(matrix::Reactant.ConcreteRArray, vector::Reactant.ConcreteRArray)
+function matrix_vector_multiply(matrix::Reactant.ConcreteRArray, vector::Reactant.ConcreteRArray)
     return matrix * vector
 end
 
@@ -114,7 +114,7 @@ function u_tpu_impl(state::Reactant.ConcreteRArray, gate::Reactant.ConcreteRArra
     s = Array(state)
     if ndims(s) == 1
         # State vector case
-        return tpu_matrix_vector_multiply(gate, state)
+        return matrix_vector_multiply(gate, state)
     else
         # Density matrix case: U * ρ * U†
         temp = tpu_matrix_matrix_multiply(gate, state)
@@ -123,7 +123,7 @@ function u_tpu_impl(state::Reactant.ConcreteRArray, gate::Reactant.ConcreteRArra
     end
 end
 
-function u_tpu!(state::Reactant.ConcreteRArray, gate::Reactant.ConcreteRArray)
+function u!(state::Reactant.ConcreteRArray, gate::Reactant.ConcreteRArray)
     return u_tpu_impl(state, gate)
 end
 
@@ -143,53 +143,53 @@ function u2_tpu_impl(state::Reactant.ConcreteRArray, target::Int, gate::Reactant
         end
     end
 
-    return u_tpu!(state, op)
+    return u!(state, op)
 end
 
 # TPU-optimized standard gates
-function h_tpu!(state::Reactant.ConcreteRArray, target::Int)
+function h!(state::Reactant.ConcreteRArray, target::Int)
     n_qubits = nb_tpu(state)
     gates = basic_gates_tpu()
     return u2_tpu_impl(state, target, gates[2], n_qubits)
 end
 
-function x_tpu!(state::Reactant.ConcreteRArray, target::Int)
+function x!(state::Reactant.ConcreteRArray, target::Int)
     n_qubits = nb_tpu(state)
     gates = basic_gates_tpu()
     return u2_tpu_impl(state, target, gates[3], n_qubits)
 end
 
-function y_tpu!(state::Reactant.ConcreteRArray, target::Int)
+function y!(state::Reactant.ConcreteRArray, target::Int)
     n_qubits = nb_tpu(state)
     gates = basic_gates_tpu()
     return u2_tpu_impl(state, target, gates[4], n_qubits)
 end
 
-function z_tpu!(state::Reactant.ConcreteRArray, target::Int)
+function z!(state::Reactant.ConcreteRArray, target::Int)
     n_qubits = nb_tpu(state)
     gates = basic_gates_tpu()
     return u2_tpu_impl(state, target, gates[5], n_qubits)
 end
 
 # Rotation gates
-function rx_tpu!(state::Reactant.ConcreteRArray, target::Int, θ::Real)
+function rx!(state::Reactant.ConcreteRArray, target::Int, θ::Real)
     n_qubits = nb_tpu(state)
     return u2_tpu_impl(state, target, rx_gate_tpu(θ), n_qubits)
 end
 
-function ry_tpu!(state::Reactant.ConcreteRArray, target::Int, θ::Real)
+function ry!(state::Reactant.ConcreteRArray, target::Int, θ::Real)
     n_qubits = nb_tpu(state)
     return u2_tpu_impl(state, target, ry_gate_tpu(θ), n_qubits)
 end
 
-function rz_tpu!(state::Reactant.ConcreteRArray, target::Int, θ::Real)
+function rz!(state::Reactant.ConcreteRArray, target::Int, θ::Real)
     n_qubits = nb_tpu(state)
     return u2_tpu_impl(state, target, rz_gate_tpu(θ), n_qubits)
 end
 
 # ====== TPU-Optimized Controlled Operations ======
 
-function controlled_tpu!(state::Reactant.ConcreteRArray, control::Int, target::Int, gate::Reactant.ConcreteRArray)
+function controlled!(state::Reactant.ConcreteRArray, control::Int, target::Int, gate::Reactant.ConcreteRArray)
     n_qubits = nb_tpu(state)
     gates = basic_gates_tpu()
     I2, _, _, _, _, P0, P1 = gates
@@ -221,10 +221,10 @@ function controlled_tpu!(state::Reactant.ConcreteRArray, control::Int, target::I
     # Full operator: |0⟩⟨0| ⊗ I + |1⟩⟨1| ⊗ U
     full_op = proj0 + tpu_matrix_matrix_multiply(proj1, controlled_op)
 
-    return u_tpu!(state, full_op)
+    return u!(state, full_op)
 end
 
-function cnot_tpu_impl(state::Reactant.ConcreteRArray, control::Int, target::Int, n_qubits::Int)
+function cnot_impl(state::Reactant.ConcreteRArray, control::Int, target::Int, n_qubits::Int)
     # Efficient CNOT implementation for TPU
     dim = 1 << n_qubits
     cnot_matrix = zeros(ComplexF32, dim, dim)
@@ -239,40 +239,40 @@ function cnot_tpu_impl(state::Reactant.ConcreteRArray, control::Int, target::Int
     end
 
     cnot_tpu = Reactant.ConcreteRArray(cnot_matrix)
-    return u_tpu!(state, cnot_tpu)
+    return u!(state, cnot_tpu)
 end
 
-function cnot_tpu!(state::Reactant.ConcreteRArray, control::Int, target::Int)
+function cnot!(state::Reactant.ConcreteRArray, control::Int, target::Int)
     n_qubits = nb_tpu(state)
-    return cnot_tpu_impl(state, control, target, n_qubits)
+    return cnot_impl(state, control, target, n_qubits)
 end
 
 # Controlled rotation gates
-function crx_tpu!(state::Reactant.ConcreteRArray, control::Int, target::Int, θ::Real)
-    return controlled_tpu!(state, control, target, rx_gate_tpu(θ))
+function crx!(state::Reactant.ConcreteRArray, control::Int, target::Int, θ::Real)
+    return controlled!(state, control, target, rx_gate_tpu(θ))
 end
 
-function cry_tpu!(state::Reactant.ConcreteRArray, control::Int, target::Int, θ::Real)
-    return controlled_tpu!(state, control, target, ry_gate_tpu(θ))
+function cry!(state::Reactant.ConcreteRArray, control::Int, target::Int, θ::Real)
+    return controlled!(state, control, target, ry_gate_tpu(θ))
 end
 
-function crz_tpu!(state::Reactant.ConcreteRArray, control::Int, target::Int, θ::Real)
-    return controlled_tpu!(state, control, target, rz_gate_tpu(θ))
+function crz!(state::Reactant.ConcreteRArray, control::Int, target::Int, θ::Real)
+    return controlled!(state, control, target, rz_gate_tpu(θ))
 end
 
-function swap_tpu!(state::Reactant.ConcreteRArray, q1::Int, q2::Int)
+function swap!(state::Reactant.ConcreteRArray, q1::Int, q2::Int)
     if q1 == q2
         return state
     end
-    state = cnot_tpu!(state, q1, q2)
-    state = cnot_tpu!(state, q2, q1)
-    state = cnot_tpu!(state, q1, q2)
+    state = cnot!(state, q1, q2)
+    state = cnot!(state, q2, q1)
+    state = cnot!(state, q1, q2)
     return state
 end
 
 # ====== TPU-Optimized Measurement Functions ======
 
-function probabilities_tpu(state::Reactant.ConcreteRArray)
+function probabilities(state::Reactant.ConcreteRArray)
     s = Array(state)
     if ndims(s) == 1
         # State vector case
@@ -283,8 +283,8 @@ function probabilities_tpu(state::Reactant.ConcreteRArray)
     end
 end
 
-function measure_z_tpu_impl(state::Reactant.ConcreteRArray, target::Int)
-    probs = probabilities_tpu(state)
+function measure_z_impl(state::Reactant.ConcreteRArray, target::Int)
+    probs = probabilities(state)
     n_qubits = nb_tpu(state)
     t_mask = 1 << (target-1)
 
@@ -304,27 +304,27 @@ function measure_z_tpu_impl(state::Reactant.ConcreteRArray, target::Int)
     return (p0, p1)
 end
 
-function measure_z_tpu(state::Reactant.ConcreteRArray, target::Int)
-    return measure_z_tpu_impl(state, target)
+function measure_z(state::Reactant.ConcreteRArray, target::Int)
+    return measure_z_impl(state, target)
 end
 
-function measure_x_tpu(state::Reactant.ConcreteRArray, target::Int)
+function measure_x(state::Reactant.ConcreteRArray, target::Int)
     # Copy state and apply H gate to rotate X basis to Z basis
     state_copy = Reactant.ConcreteRArray(Array(state))
-    state_copy = h_tpu!(state_copy, target)
-    return measure_z_tpu(state_copy, target)
+    state_copy = h!(state_copy, target)
+    return measure_z(state_copy, target)
 end
 
-function measure_y_tpu(state::Reactant.ConcreteRArray, target::Int)
+function measure_y(state::Reactant.ConcreteRArray, target::Int)
     # Copy state and apply rotation to measure in Y basis
     state_copy = Reactant.ConcreteRArray(Array(state))
-    state_copy = rx_tpu!(state_copy, target, π/2)
-    return measure_z_tpu(state_copy, target)
+    state_copy = rx!(state_copy, target, π/2)
+    return measure_z(state_copy, target)
 end
 
 # ====== Enhanced State Display Function ======
 
-function prstate_tpu(state::Reactant.ConcreteRArray; threshold::Float64=1e-6, as_binary::Bool=true)
+function prstate(state::Reactant.ConcreteRArray; threshold::Float64=1e-6, as_binary::Bool=true)
     st = Array(state)
 
     if ndims(st) == 1
