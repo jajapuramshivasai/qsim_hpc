@@ -11,7 +11,6 @@ homepage    = "https://github.com/jajapuramshivasai/qsim_hpc"
 [deps]
 BenchmarkTools = "6e4b80f9-1b20-5cda-9f2b-0fad3b044bbf"      # for benchmarking
 Reactant       = "452415d9-fd4f-5ecd-9d44-1bb6b8c24fd0"      # TPU support
-LinearAlgebra  = "37e2e46d-f89d-539d-b570-10b6e7a73e17"      # stdlib
 SparseArrays   = "10745b16-e7e4-5f42-918a-c121a721e6b1"      # stdlib
 
 [compat]
