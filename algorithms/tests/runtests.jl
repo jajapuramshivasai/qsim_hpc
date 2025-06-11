@@ -1,4 +1,4 @@
-using JuliaTest
+using Test
 
 @testset "Algorithm Tests" begin
     @testset "Test Algorithm 1" begin

@@ -1,16 +1,15 @@
 # Project.toml for qsim_hpc
 name        = "qsim_hpc"                                  # Package name (must be a valid Julia identifier)
-uuid        = "d4e8a9c2-3f4b-4b72-9e10-abcdef123456"      # Generate with `using UUIDs; UUIDs.uuid4()`
+uuid        = "9209dbf7-80b8-4bfa-9f05-f24687d92981"      # Generate with `using UUIDs; UUIDs.uuid4()`
 version     = "0.1.0"                                     # Semantic versioning
 
-authors     = ["Shiva Sai Jajapuram <your.email@example.com>"]
+authors     = ["Shiva Sai Jajapuram <jajapuramshivasai@gmail.com>"]
 description = "High-performance Julia simulator for quantum circuits (multi-threaded CPU & TPU backends)."
 license     = "GPL-3.0-or-later"
 homepage    = "https://github.com/jajapuramshivasai/qsim_hpc"
 
 [deps]
 BenchmarkTools = "6e4b80f9-1b20-5cda-9f2b-0fad3b044bbf"      # for benchmarking
-Polyester      = "1a297f60-5b28-11ea-0544-372e4e756240"      # multi-threaded ops
 Reactant       = "452415d9-fd4f-5ecd-9d44-1bb6b8c24fd0"      # TPU support
 LinearAlgebra  = "37e2e46d-f89d-539d-b570-10b6e7a73e17"      # stdlib
 SparseArrays   = "10745b16-e7e4-5f42-918a-c121a721e6b1"      # stdlib
@@ -18,5 +17,4 @@ SparseArrays   = "10745b16-e7e4-5f42-918a-c121a721e6b1"      # stdlib
 [compat]
 julia          = "1.6"                                     # minimum Julia version
 BenchmarkTools = "1.0"
-Polyester      = "0.3"
 Reactant       = "0.2"
